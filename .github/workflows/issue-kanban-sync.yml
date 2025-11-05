@@ -1,0 +1,79 @@
+name: Issue-Kanban Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      sync_mode:
+        description: 'Sync mode: issue-to-kanban, kanban-to-issue, or bidirectional'
+        required: true
+        default: 'issue-to-kanban'
+        type: choice
+        options:
+          - issue-to-kanban
+          - kanban-to-issue
+          - bidirectional
+  issues:
+    types: [opened, closed, reopened, labeled, unlabeled]
+  schedule:
+    # Run daily at midnight UTC for automatic sync
+    - cron: '0 0 * * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install PyGithub requests
+      
+      - name: Determine sync mode
+        id: sync_mode
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.sync_mode }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "issues" ]; then
+            echo "mode=issue-to-kanban" >> $GITHUB_OUTPUT
+          else
+            echo "mode=bidirectional" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Run Issue-to-Kanban Sync
+        if: steps.sync_mode.outputs.mode == 'issue-to-kanban' || steps.sync_mode.outputs.mode == 'bidirectional'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          python .github/scripts/sync_issues_to_kanban.py
+      
+      - name: Run Kanban-to-Issue Sync
+        if: steps.sync_mode.outputs.mode == 'kanban-to-issue' || steps.sync_mode.outputs.mode == 'bidirectional'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          python .github/scripts/sync_kanban_to_issues.py
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add KANBAN.md
+          git diff --cached --quiet || git commit -m "chore: sync issues and KANBAN.md [skip ci]"
+          git push
+        continue-on-error: true
