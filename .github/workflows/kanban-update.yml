@@ -1,0 +1,23 @@
+name: Check off Kanban tasks on PR merge
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  update-kanban:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract task IDs from PR body
+        id: parse
+        run: |
+          echo "TASK_IDS=$(echo '${{ github.event.pull_request.body }}' | grep -o '\[TASK-[0-9]\+\]' | tr '\n' ',' | sed 's/,$//')" >> $GITHUB_ENV
+      - name: Update Kanban Markdown file
+        run: |
+          for task in $(echo $TASK_IDS | tr ',' '\n'); do
+            sed -i "s/- \[ \] $task/- [x] $task/" KANBAN.md
+          done
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: Check off completed Kanban tasks'
