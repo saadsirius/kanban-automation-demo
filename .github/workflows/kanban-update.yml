@@ -21,3 +21,92 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: Check off completed Kanban tasks'
+      - name: Send Slack notification
+        if: env.TASK_IDS != ''
+        uses: actions/github-script@v7
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          script: |
+            const taskIds = process.env.TASK_IDS;
+            const prTitle = context.payload.pull_request.title;
+            const prUrl = context.payload.pull_request.html_url;
+            const prAuthor = context.payload.pull_request.user.login;
+            const prNumber = context.payload.pull_request.number;
+            
+            // Format task list for Slack message
+            const taskList = taskIds.split(',').map(t => `• ${t}`).join('\n');
+            
+            const slackMessage = {
+              blocks: [
+                {
+                  type: "header",
+                  text: {
+                    type: "plain_text",
+                    text: "✅ Kanban Tasks Completed"
+                  }
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: `*PR #${prNumber}:* <${prUrl}|${prTitle}>\n*Author:* ${prAuthor}\n\n*Completed Tasks:*\n${taskList}`
+                  }
+                },
+                {
+                  type: "context",
+                  elements: [
+                    {
+                      type: "mrkdwn",
+                      text: `Merged at ${new Date().toISOString()}`
+                    }
+                  ]
+                }
+              ]
+            };
+            
+            // Send to Slack webhook
+            const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+            if (!webhookUrl) {
+              core.setFailed('SLACK_WEBHOOK_URL secret not configured');
+              return;
+            }
+            
+            const https = require('https');
+            const url = require('url');
+            const parsedUrl = url.parse(webhookUrl);
+            
+            const postData = JSON.stringify(slackMessage);
+            
+            const options = {
+              hostname: parsedUrl.hostname,
+              port: parsedUrl.port || 443,
+              path: parsedUrl.path,
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+              }
+            };
+            
+            await new Promise((resolve, reject) => {
+              const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                  if (res.statusCode >= 200 && res.statusCode < 300) {
+                    core.info(`Slack notification sent successfully to channel`);
+                    resolve();
+                  } else {
+                    reject(new Error(`Slack API returned ${res.statusCode}: ${data}`));
+                  }
+                });
+              });
+              
+              req.on('error', (error) => {
+                reject(error);
+              });
+              
+              req.write(postData);
+              req.end();
+            });in
